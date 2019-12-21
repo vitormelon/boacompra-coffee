@@ -2,22 +2,23 @@
 // WIFI
 
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
-#include "ESP8266AWSImplementations.h"
-
-Esp8266HttpClient httpClient;
-Esp8266DateTimeProvider dateTimeProvider;
 
 //EEPROM
 #include <EEPROM.h>
+
+//CONFIGURATION
+const char NODE_UUID[37]        = "";
+const String HASURA_URL         = "";
+const String HASURA_FINGERPRINT = "";
+const String HASURA_SECRET      = "";
+
+
+//EEPROM
 const int EEPROM_ADDRESS = 0;
-
-// AWS
-
-#include <AmazonSNSClient.h>
-#include <ESP8266AWSImplementations.h>
 
 // LOGS 
 const int LOGS_ENABLED = false; 
@@ -43,6 +44,17 @@ int state = 2;
 
 // STATE MONITOR
 int stateChanged = false;
+
+//FUNCTIONS
+void updateLED();
+void setLEDRed();
+void setLEDGreen();
+void setLEDBlue();
+void setLEDOff();
+bool sendMessage();
+void saveState(int state);
+int initializeState();
+
 
 void setup() {
   // INITIALIZE SERIAL
@@ -154,50 +166,39 @@ void loop() {
 // MESSAGING FUNCTIONS
 
 bool sendMessage() {
+  HTTPClient http;
   
-  ActionError actionError;
-  
-  AmazonSNSClient snsClient;
-  snsClient.setAWSRegion("sa-east-1");
-  snsClient.setAWSEndpoint("amazonaws.com");
-  snsClient.setAWSKeyID("");
-  snsClient.setAWSSecretKey("");
-  snsClient.setHttpClient(&httpClient);
-  snsClient.setDateTimeProvider(&dateTimeProvider);
-  
-
-  PublishInput publishInput;
-  publishInput.setTargetArn("arn:aws:sns:sa-east-1:371355836815:bc-coffe-notify");
-
-  char location[10] = "Sala 1006";
   char hasCoffee[5];
   char message[256];
+
+  http.begin(HASURA_URL, HASURA_FINGERPRINT);
+  http.addHeader("Content-Type", "application/json", false, true);
+  http.addHeader("x-hasura-admin-secret", HASURA_SECRET);
 
   if (state == STATE_HAVE) {
     strcpy(hasCoffee, "true");
   } else {
     strcpy(hasCoffee, "false");
   }
+  
+  snprintf(
+    message, 
+    sizeof message, 
+    "{\"query\":\"mutationMyMutation{insert_events(objects:{event:{hasCoffee:%s},node_id:\\\"%s\\\"}){returning{event_id}}}\"}", 
+    hasCoffee, 
+    NODE_UUID);
 
-  snprintf(message, sizeof message, "{\"type\":\"BUTTON\",\"data\":{\"hasCoffee\":%s,\"location\":\"%s\"}}", hasCoffee, location);
-  
-  publishInput.setMessage(message);
-  
-  PublishOutput result = snsClient.publish(publishInput, actionError);
-  
-  
-  Serial.print("Action error: ");
-  Serial.println(actionError);
-  Serial.print("Message ID: ");
-  Serial.println(result.getMessageId().getCStr());
-  Serial.print("Error type: ");
-  Serial.println(result.getErrorType().getCStr());
-  Serial.print("Error message: ");
-  Serial.println(result.getErrorMessage().getCStr());
+  int httpCode = http.POST(message);
 
-  if(actionError > 0){
-    return false;
-  }
+  Serial.print("Mensagem enviada: ");
+  Serial.println(message);
+  
+  Serial.print("Http Code: ");
+  Serial.println(httpCode);
+
+  String payload = http.getString();
+  Serial.print("Resposta: ");
+  Serial.println(payload);
   return true;
 }
 
